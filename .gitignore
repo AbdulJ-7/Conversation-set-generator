@@ -11,3 +11,4 @@ wheels/
 
 #SECRETS
 .env
+*.env

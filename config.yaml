@@ -1,0 +1,66 @@
+# Configuration for Function Calling Conversation Generator
+
+# LLM Settings
+llm:
+  provider: "openai"  # Options: openai, anthropic, google
+  model: "gpt-4o"     # Model name for the selected provider
+  temperature: 0.7    # Temperature for generation (0.0 - 1.0)
+  max_tokens: 4096    # Maximum tokens per response
+
+# Generation Settings
+generation:
+  num_conversation_sets: 5  # Number of conversation sets to generate
+  output_folder: "conversation_sets"  # Output folder name
+  batch_size: 5  # Number of conversation sets to generate in each API call
+
+# API Keys (stored in .env file)
+# OPENAI_API_KEY=your_openai_key_here
+# ANTHROPIC_API_KEY=your_anthropic_key_here  
+# GOOGLE_API_KEY=your_google_key_here
+
+# Model mappings for different providers
+models:
+  openai:
+    - "gpt-4o"
+    - "gpt-4o-mini"
+    - "gpt-4-turbo"
+    - "gpt-3.5-turbo"
+  anthropic:
+    - "claude-3-5-sonnet-20241022"
+    - "claude-3-5-haiku-20241022"
+    - "claude-3-opus-20240229"
+  google:
+    - "gemini-1.5-pro"
+    - "gemini-1.5-flash"
+    - "gemini-pro"
+
+# Function calling tools available (for reference in prompts)
+available_tools:
+  - "amadeus_travel"
+  - "arxiv_search"
+  - "calculator"
+  - "current_time"
+  - "email_sender"
+  - "github"
+  - "google_places"
+  - "google_trends"
+  - "mealdb_food"
+  - "pubmed"
+  - "search_brave"
+  - "steam"
+  - "tmdb_movies"
+  - "weather"
+  - "wikipedia"
+  - "yahoo_finance"
+  - "youtube_search"
+  - "youtube_summarizer"
+
+# Example conversation set file path (reference for prompts)
+example_conversation_file: "conversation_sets/example_conversation_set.md"
+
+# Google Sheets Export Settings
+google_sheets:
+  enabled: false  # Set to true to enable automatic export
+  spreadsheet_title: "Function Calling Conversation Sets"
+  credentials_file: "credentials.json"  # Path to Google service account credentials
+  export_summary: true  # Also export generation summary

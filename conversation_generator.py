@@ -212,7 +212,7 @@ class ConversationGenerator:
                 print(f"Waiting {delay} seconds before next batch...")
                 time.sleep(delay)
         
-        # Generate summary
+        # Generate summary for console display only
         summary = {
             "total_requested": total_sets,
             "total_generated": generated_count,
@@ -224,26 +224,23 @@ class ConversationGenerator:
             "files": all_files
         }
         
-        # Save summary
-        summary_file = self.output_folder / "generation_summary.json"
-        with open(summary_file, 'w', encoding='utf-8') as file:
-            json.dump(summary, file, indent=2)
-        
         print("\n" + "=" * 50)
         print("GENERATION COMPLETE!")
         print(f"Total conversation sets generated: {generated_count}")
         print(f"Files created: {len(all_files)}")
         print(f"Output folder: {self.output_folder.absolute()}")
-        print(f"Summary saved to: {summary_file}")
+        print(f"Provider: {self.config['llm']['provider']} ({self.config['llm']['model']})")
+        print(f"Temperature: {self.config['llm']['temperature']}")
+        print(f"Generation time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Export to Google Sheets if enabled
-        self._export_to_google_sheets(summary)
+        # Export to Google Sheets if enabled (conversation sets only)
+        self._export_to_google_sheets()
         
         print("=" * 50)
         
         return summary
     
-    def _export_to_google_sheets(self, summary: Dict[str, Any]):
+    def _export_to_google_sheets(self):
         """Export conversation sets to Google Sheets if enabled"""
         google_sheets_config = self.config.get('google_sheets', {})
         
@@ -258,20 +255,15 @@ class ConversationGenerator:
                 credentials_file=google_sheets_config.get('credentials_file', 'credentials.json')
             )
             
-            spreadsheet_title = google_sheets_config.get('spreadsheet_title', 'Function Calling Conversation Sets')
+            spreadsheet_url = google_sheets_config.get('spreadsheet_url', '')
             
-            # Export conversation sets
+            # Export conversation sets only
             success = exporter.export_conversation_sets(
                 conversation_sets_folder=str(self.output_folder),
-                spreadsheet_title=spreadsheet_title
+                spreadsheet_url=spreadsheet_url if spreadsheet_url else None,
+                worksheet_name=google_sheets_config.get('worksheet_name'),
+                start_row=google_sheets_config.get('start_row', 2)
             )
-            
-            # Export summary if enabled and main export succeeded
-            if success and google_sheets_config.get('export_summary', True):
-                exporter.export_summary(
-                    summary_file=str(self.output_folder / "generation_summary.json"),
-                    spreadsheet_title=spreadsheet_title
-                )
             
             if success:
                 print("✅ Google Sheets export completed successfully!")

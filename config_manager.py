@@ -52,7 +52,7 @@ class ConfigManager:
                 'enabled': False,
                 'spreadsheet_title': 'Function Calling Conversation Sets',
                 'credentials_file': 'credentials.json',
-                'export_summary': True
+                'spreadsheet_url': ''
             }
         }
     
@@ -201,6 +201,35 @@ class ConfigManager:
             creds_input = input(f"Credentials file path [current: {current_creds}]: ").strip()
             if creds_input:
                 self.config['google_sheets']['credentials_file'] = creds_input
+            
+            # Spreadsheet URL (optional)
+            current_url = self.config['google_sheets'].get('spreadsheet_url', '')
+            print("\n   💡 Optional: If you have storage quota issues, you can manually create")
+            print("      a spreadsheet and provide its URL here to use it instead.")
+            url_input = input(f"Spreadsheet URL (optional) [current: {current_url or 'none'}]: ").strip()
+            self.config['google_sheets']['spreadsheet_url'] = url_input
+            
+            # Worksheet name
+            current_worksheet = self.config['google_sheets'].get('worksheet_name', self.config['google_sheets'].get('spreadsheet_title', 'Function Calling Conversation Sets'))
+            worksheet_input = input(f"Worksheet name [current: {current_worksheet}]: ").strip()
+            if worksheet_input:
+                self.config['google_sheets']['worksheet_name'] = worksheet_input
+            elif 'worksheet_name' not in self.config['google_sheets']:
+                self.config['google_sheets']['worksheet_name'] = current_worksheet
+            
+            # Start row
+            current_start_row = self.config['google_sheets'].get('start_row', 2)
+            print(f"\n   💡 Row number to start writing data (1 = first row, 2 = second row after headers)")
+            try:
+                start_row_input = input(f"Start row [current: {current_start_row}]: ").strip()
+                if start_row_input:
+                    start_row = int(start_row_input)
+                    if start_row >= 1:
+                        self.config['google_sheets']['start_row'] = start_row
+                    else:
+                        print("❌ Start row must be 1 or greater, keeping current value")
+            except ValueError:
+                print("❌ Invalid start row value, keeping current value")
             
             print("✅ Google Sheets export enabled!")
             print("💡 Make sure to configure your Google Cloud credentials (see setup instructions)")

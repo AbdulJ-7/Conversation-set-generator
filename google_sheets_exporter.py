@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Google Sheets exporter for conversation sets
 """
@@ -7,9 +8,9 @@ import json
 import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from google.auth.exceptions import RefreshError
 from pathlib import Path
 import re
+import yaml
 
 
 class GoogleSheetsExporter:
@@ -43,12 +44,21 @@ class GoogleSheetsExporter:
             print("Please check your credentials file and permissions.")
             self.gc = None
     
-    def create_or_open_spreadsheet(self, title: str = "Function Calling Conversation Sets") -> Optional[gspread.Spreadsheet]:
+    def get_service_account_email(self) -> Optional[str]:
+        """Get the service account email from credentials"""
+        try:
+            with open(self.credentials_file, 'r') as f:
+                creds_data = json.load(f)
+                return creds_data.get('client_email')
+        except Exception:
+            return None
+    
+    def open_spreadsheet(self, spreadsheet_url: str) -> Optional[gspread.Spreadsheet]:
         """
-        Create a new spreadsheet or open existing one
+        Open an existing spreadsheet by URL
         
         Args:
-            title: Name of the spreadsheet
+            spreadsheet_url: URL or ID of existing spreadsheet
             
         Returns:
             Spreadsheet object or None if failed
@@ -58,86 +68,71 @@ class GoogleSheetsExporter:
             return None
         
         try:
-            # Try to open existing spreadsheet
-            try:
-                spreadsheet = self.gc.open(title)
-                print(f"✅ Opened existing spreadsheet: {title}")
-                return spreadsheet
-            except gspread.SpreadsheetNotFound:
-                # Create new spreadsheet
-                spreadsheet = self.gc.create(title)
-                print(f"✅ Created new spreadsheet: {title}")
-                
-                # Share with your email (you'll need to add this manually or via config)
-                # spreadsheet.share('your-email@gmail.com', perm_type='user', role='writer')
-                
-                return spreadsheet
-                
+            if spreadsheet_url.startswith('https://'):
+                spreadsheet = self.gc.open_by_url(spreadsheet_url)
+            else:
+                # Assume it's a spreadsheet ID
+                spreadsheet = self.gc.open_by_key(spreadsheet_url)
+            print(f"✅ Opened spreadsheet: {spreadsheet.title}")
+            return spreadsheet
         except Exception as e:
-            print(f"❌ Failed to create/open spreadsheet: {e}")
+            service_email = self.get_service_account_email()
+            print(f"❌ Cannot access spreadsheet: {e}")
+            print("\n💡 TROUBLESHOOTING:")
+            print("1. Make sure the spreadsheet URL is correct")
+            if service_email:
+                print(f"2. Make sure you've shared the spreadsheet with: {service_email}")
+            else:
+                print("2. Make sure you've shared the spreadsheet with your service account email")
+            print("3. Make sure the service account has 'Editor' permissions")
+            print("4. Try opening the spreadsheet URL in your browser to verify it exists")
             return None
     
-    def setup_worksheet_headers(self, worksheet):
-        """Setup headers for the conversation sets worksheet"""
+    def get_or_create_worksheet(self, spreadsheet, worksheet_name: str):
+        """Get or create worksheet with given name"""
+        try:
+            worksheet = spreadsheet.worksheet(worksheet_name)
+            print(f"✅ Using existing worksheet: {worksheet_name}")
+            return worksheet
+        except gspread.WorksheetNotFound:
+            # Create new worksheet
+            worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows=1000, cols=26)
+            print(f"✅ Created new worksheet: {worksheet_name}")
+            return worksheet
+    
+    def setup_headers(self, worksheet, start_row: int = 1):
+        """Setup column headers"""
         headers = [
-            "ID",
-            "Title", 
-            "User Motive",
-            "Domains & Subdomains",
-            "Turn 1",
-            "Tools 1",
-            "Turn 2", 
-            "Tools 2",
-            "Turn 3",
-            "Tools 3", 
-            "Turn 4",
-            "Tools 4",
-            "Turn 5", 
-            "Tools 5",
-            "Turn 6",
-            "Tools 6",
-            "Turn 7",
-            "Tools 7",
-            "Turn 8", 
-            "Tools 8",
-            "Generated On",
-            "Provider",
-            "Model",
-            "Temperature",
-            "File Path"
+            "ID", "Title", "User Motive", "Domains & Subdomains",
+            "Turn 1", "Tools 1", "Turn 2", "Tools 2",
+            "Turn 3", "Tools 3", "Turn 4", "Tools 4",
+            "Turn 5", "Tools 5", "Turn 6", "Tools 6",
+            "Turn 7", "Tools 7", "Turn 8", "Tools 8",
+            "Generated On", "Provider", "Model", "Temperature", "File Path"
         ]
         
-        # Clear existing content and set headers
-        worksheet.clear()
-        worksheet.append_row(headers)
-        
-        # Format header row
-        worksheet.format('A1:Y1', {
-            'textFormat': {'bold': True},
-            'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
-        })
-        
-        print("✅ Worksheet headers configured")
+        # Only add headers if starting at row 1
+        if start_row == 1:
+            try:
+                # Check if headers already exist
+                existing_headers = worksheet.row_values(1)
+                if not existing_headers or existing_headers[0] != "ID":
+                    worksheet.insert_row(headers, 1)
+                    print("✅ Headers added to worksheet")
+            except Exception:
+                worksheet.insert_row(headers, 1)
+                print("✅ Headers added to worksheet")
     
-    def parse_conversation_set(self, file_path: str) -> Dict[str, Any]:
-        """
-        Parse a conversation set markdown file
-        
-        Args:
-            file_path: Path to the conversation set file
-            
-        Returns:
-            Dictionary with parsed conversation data
-        """
+    def parse_conversation_file(self, file_path: str) -> Dict[str, Any]:
+        """Parse a conversation set markdown file"""
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 content = file.read()
             
-            # Extract metadata from header
+            # Extract metadata
             metadata = {}
             lines = content.split('\n')
-            
-            for line in lines[:10]:  # Check first 10 lines for metadata
+            for line in lines[:10]:
                 if line.startswith('**Generated on:**'):
                     metadata['generated_on'] = line.replace('**Generated on:**', '').strip()
                 elif line.startswith('**Provider:**'):
@@ -151,53 +146,65 @@ class GoogleSheetsExporter:
             title_match = re.search(r'# Conversation Set \d+:\s*(.+)', content)
             title = title_match.group(1).strip() if title_match else "Unknown"
             
-            # Extract ID from filename
-            id_match = re.search(r'conversation_set_(\d+)', file_path)
-            conv_id = id_match.group(1) if id_match else "000"
-            
             # Extract user motive
-            user_motive_match = re.search(r'\*\*User Motive:\*\*\s*(.+?)(?=\*\*|---|\n\n)', content, re.DOTALL)
-            user_motive = user_motive_match.group(1).strip() if user_motive_match else ""
+            motive_match = re.search(r'\*\*User Motive:\*\*\s*(.+)', content)
+            user_motive = motive_match.group(1).strip() if motive_match else ""
             
             # Extract domains
-            domains_match = re.search(r'\*\*Domains & Subdomains:\*\*\s*(.+?)(?=\*\*|---|\n\n)', content, re.DOTALL)
+            domains_match = re.search(r'\*\*Domains & Subdomains:\*\*\s*(.+)', content)
             domains = domains_match.group(1).strip() if domains_match else ""
             
-            # Extract turns and tools
+            # Extract conversation turns and tools
             turns = []
             tools = []
             
-            # Find all numbered sections (### 1., ### 2., etc.)
-            turn_pattern = r'### (\d+)\.?\s*\n\n?>\s*(.+?)\n\n\*\*Tools:\*\*\s*(.+?)(?=---|###|\Z)'
-            turn_matches = re.findall(turn_pattern, content, re.DOTALL)
+            # Find all "User:" and "Tools used:" patterns
+            user_pattern = r'User:\s*(.+?)(?=\n\n|\nTools used:|Assistant:)'
+            tool_pattern = r'Tools used:\s*(.+?)(?=\n\n|\nUser:|Assistant:)'
             
-            for turn_num, turn_content, turn_tools in turn_matches:
-                turns.append(turn_content.strip())
-                tools.append(turn_tools.strip())
+            user_matches = re.findall(user_pattern, content, re.DOTALL)
+            tool_matches = re.findall(tool_pattern, content, re.DOTALL)
+            
+            # Process up to 8 turns
+            for i in range(min(8, len(user_matches))):
+                turns.append(user_matches[i].strip())
+                tools.append(tool_matches[i].strip() if i < len(tool_matches) else "")
+            
+            # Pad with empty strings if less than 8 turns
+            while len(turns) < 8:
+                turns.append("")
+                tools.append("")
+            
+            # Extract ID from filename
+            file_id = Path(file_path).stem.replace('conversation_set_', '')
             
             return {
-                'id': conv_id,
+                'id': file_id,
                 'title': title,
                 'user_motive': user_motive,
                 'domains': domains,
                 'turns': turns,
                 'tools': tools,
-                'metadata': metadata,
-                'file_path': file_path
+                'metadata': metadata
             }
             
         except Exception as e:
             print(f"❌ Error parsing {file_path}: {e}")
             return None
     
-    def export_conversation_sets(self, conversation_sets_folder: str = "conversation_sets", 
-                                spreadsheet_title: str = "Function Calling Conversation Sets") -> bool:
+    def export_conversation_sets(self, 
+                                conversation_sets_folder: str = "conversation_sets",
+                                spreadsheet_url: str = None,
+                                worksheet_name: str = "Conversation Sets",
+                                start_row: int = 2) -> bool:
         """
         Export all conversation sets to Google Sheets
         
         Args:
             conversation_sets_folder: Folder containing conversation set files
-            spreadsheet_title: Name of the Google Sheets spreadsheet
+            spreadsheet_url: URL of the target spreadsheet
+            worksheet_name: Name of the worksheet to write to
+            start_row: Row number to start writing data
             
         Returns:
             True if successful, False otherwise
@@ -206,35 +213,35 @@ class GoogleSheetsExporter:
             print("❌ Not authenticated with Google Sheets")
             return False
         
-        # Create or open spreadsheet
-        spreadsheet = self.create_or_open_spreadsheet(spreadsheet_title)
+        if not spreadsheet_url:
+            print("❌ Spreadsheet URL is required")
+            return False
+        
+        # Open spreadsheet
+        spreadsheet = self.open_spreadsheet(spreadsheet_url)
         if not spreadsheet:
             return False
         
         # Get or create worksheet
-        try:
-            worksheet = spreadsheet.worksheet("Conversation Sets")
-        except gspread.WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(title="Conversation Sets", rows=1000, cols=26)
+        worksheet = self.get_or_create_worksheet(spreadsheet, worksheet_name)
+        if not worksheet:
+            return False
         
         # Setup headers
-        self.setup_worksheet_headers(worksheet)
+        self.setup_headers(worksheet, start_row if start_row == 1 else 1)
         
-        # Find all conversation set files
+        # Find conversation files
         conversation_files = list(Path(conversation_sets_folder).glob("conversation_set_*.md"))
-        
         if not conversation_files:
             print(f"❌ No conversation set files found in {conversation_sets_folder}")
             return False
         
         print(f"📄 Found {len(conversation_files)} conversation set files")
         
-        # Parse and export each file
+        # Parse files and prepare data
         rows_to_add = []
-        successful_exports = 0
-        
         for file_path in sorted(conversation_files):
-            parsed_data = self.parse_conversation_set(str(file_path))
+            parsed_data = self.parse_conversation_file(str(file_path))
             if parsed_data:
                 # Create row data
                 row_data = [
@@ -244,15 +251,12 @@ class GoogleSheetsExporter:
                     parsed_data['domains']
                 ]
                 
-                # Add up to 8 turns and their tools
+                # Add turns and tools
                 for i in range(8):
-                    if i < len(parsed_data['turns']):
-                        row_data.extend([
-                            parsed_data['turns'][i],
-                            parsed_data['tools'][i]
-                        ])
-                    else:
-                        row_data.extend(["", ""])  # Empty cells for unused turns
+                    row_data.extend([
+                        parsed_data['turns'][i],
+                        parsed_data['tools'][i]
+                    ])
                 
                 # Add metadata
                 metadata = parsed_data['metadata']
@@ -265,110 +269,71 @@ class GoogleSheetsExporter:
                 ])
                 
                 rows_to_add.append(row_data)
-                successful_exports += 1
         
-        # Batch update all rows
+        # Write data to spreadsheet
         if rows_to_add:
             try:
-                worksheet.append_rows(rows_to_add)
-                print(f"✅ Successfully exported {successful_exports} conversation sets to Google Sheets")
+                # Determine where to write data
+                if start_row == 1:
+                    # Append after existing data
+                    worksheet.append_rows(rows_to_add)
+                else:
+                    # Write starting from specific row
+                    range_start = f"A{start_row}"
+                    worksheet.update(range_name=range_start, values=rows_to_add)
+                
+                print(f"✅ Successfully exported {len(rows_to_add)} conversation sets to Google Sheets")
+                print(f"📊 Data written starting from row {start_row}")
                 print(f"📊 Spreadsheet URL: {spreadsheet.url}")
                 return True
+                
             except Exception as e:
                 print(f"❌ Failed to write to Google Sheets: {e}")
                 return False
         else:
             print("❌ No valid conversation sets to export")
             return False
-    
-    def export_summary(self, summary_file: str = "conversation_sets/generation_summary.json",
-                      spreadsheet_title: str = "Function Calling Conversation Sets") -> bool:
-        """
-        Export generation summary to a separate worksheet
-        
-        Args:
-            summary_file: Path to the generation summary JSON file
-            spreadsheet_title: Name of the Google Sheets spreadsheet
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self.gc:
-            print("❌ Not authenticated with Google Sheets")
-            return False
-        
-        if not os.path.exists(summary_file):
-            print(f"❌ Summary file not found: {summary_file}")
-            return False
-        
-        try:
-            with open(summary_file, 'r', encoding='utf-8') as file:
-                summary_data = json.load(file)
-        except Exception as e:
-            print(f"❌ Error reading summary file: {e}")
-            return False
-        
-        # Open spreadsheet
-        spreadsheet = self.create_or_open_spreadsheet(spreadsheet_title)
-        if not spreadsheet:
-            return False
-        
-        # Get or create summary worksheet
-        try:
-            worksheet = spreadsheet.worksheet("Generation Summary")
-        except gspread.WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(title="Generation Summary", rows=100, cols=10)
-        
-        # Clear and setup summary worksheet
-        worksheet.clear()
-        
-        # Add summary data
-        summary_rows = [
-            ["Generation Summary", ""],
-            ["", ""],
-            ["Total Requested", summary_data.get('total_requested', '')],
-            ["Total Generated", summary_data.get('total_generated', '')],
-            ["Files Created", summary_data.get('files_created', '')],
-            ["Provider", summary_data.get('provider', '')],
-            ["Model", summary_data.get('model', '')],
-            ["Generation Time", summary_data.get('generation_time', '')],
-            ["Output Folder", summary_data.get('output_folder', '')],
-            ["", ""],
-            ["Generated Files:", ""]
-        ]
-        
-        # Add file list
-        for file_path in summary_data.get('files', []):
-            summary_rows.append([os.path.basename(file_path), file_path])
-        
-        worksheet.append_rows(summary_rows)
-        
-        # Format header
-        worksheet.format('A1:B1', {
-            'textFormat': {'bold': True, 'fontSize': 16},
-            'backgroundColor': {'red': 0.8, 'green': 0.9, 'blue': 1.0}
-        })
-        
-        print("✅ Successfully exported generation summary to Google Sheets")
-        return True
 
 
 def main():
     """Main function for testing the Google Sheets exporter"""
-    exporter = GoogleSheetsExporter()
+    print("🔄 Exporting conversation sets...")
     
-    if exporter.gc:
-        print("🔄 Exporting conversation sets...")
-        success = exporter.export_conversation_sets()
-        
-        if success:
-            print("🔄 Exporting generation summary...")
-            exporter.export_summary()
-            print("🎉 Export completed successfully!")
-        else:
-            print("❌ Export failed")
+    # Load config
+    try:
+        with open('config.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print("❌ config.yaml not found")
+        return False
+    
+    # Get Google Sheets settings
+    gs_config = config.get('google_sheets', {})
+    if not gs_config.get('enabled', False):
+        print("❌ Google Sheets export is not enabled in config.yaml")
+        return False
+    
+    # Initialize exporter
+    exporter = GoogleSheetsExporter(gs_config.get('credentials_file', 'credentials.json'))
+    
+    if not exporter.gc:
+        print("❌ Authentication failed")
+        return False
+    
+    # Export with configured settings
+    success = exporter.export_conversation_sets(
+        conversation_sets_folder='conversation_sets',
+        spreadsheet_url=gs_config.get('spreadsheet_url'),
+        worksheet_name=gs_config.get('worksheet_name', 'Conversation Sets'),
+        start_row=gs_config.get('start_row', 2)
+    )
+    
+    if success:
+        print('✅ Export completed successfully!')
+        return True
     else:
-        print("❌ Cannot export - authentication failed")
+        print('❌ Export failed')
+        return False
 
 
 if __name__ == "__main__":

@@ -60,7 +60,9 @@ example_conversation_file: "conversation_sets/example_conversation_set.md"
 
 # Google Sheets Export Settings
 google_sheets:
-  enabled: false  # Set to true to enable automatic export
-  spreadsheet_title: "Function Calling Conversation Sets"
+  enabled: true  # Set to true/false to enable/disable automatic export
+  spreadsheet_title: "Epsilon"
   credentials_file: "credentials.json"  # Path to Google service account credentials
-  export_summary: true  # Also export generation summary
+  spreadsheet_url: "https://docs.google.com/spreadsheets/d/1wbCzztCG7EvH-Pg1wJquVw1djhpTa_Wvq56TvrXbd2U/edit?gid=1402678423#gid=1402678423"  # Optional: URL or ID of existing spreadsheet (leave empty to create new)
+  worksheet_name: "Epsilon"  # Name of the worksheet to write to (default: uses spreadsheet_title)
+  start_row: 30  # Row number to start writing data (1 = first row, 2 = second row, etc.)
